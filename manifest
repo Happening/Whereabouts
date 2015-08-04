@@ -1,3 +1,4 @@
-name: Example
-description: An example plugin. Use this as the base for your own glorious plugins!
+name: LocationChecker
+description: Check the location of the people in your group
 api: 2
+icon: map2

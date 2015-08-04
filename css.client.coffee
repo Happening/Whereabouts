@@ -1,0 +1,43 @@
+Dom = require 'dom'
+
+Dom.css
+	#Indication Arrow
+	'.indicationArrow':
+		width: '30px'
+		height: '30px'
+		bottom: '10px'
+		left: '10px'
+		position: 'absolute'
+		borderRadius: '15px'
+		zIndex: '10'
+		_boxShadow: '0 0 6px rgba(255, 255, 255, 0.5)'
+	'.indicationArrow:before':
+		content: '""'
+		display: 'block'
+		position: 'absolute'
+		width: '6px'
+		backgroundColor: 'white'
+		top: '15px'
+		left: '12px'
+		height: '7px'
+	'.indicationArrow:after':
+		content: '""'
+		display: 'block'
+		width: '0'
+		height: '0'
+		top: '5px'
+		left: '7px'
+		borderBottom: 'solid 10px white'
+		borderLeft: 'solid 8px transparent'
+		borderRight: 'solid 8px transparent'
+		position: 'absolute'
+	'.indicationArrowText':
+		fontSize: '12px'
+		color: '#000000'
+		fontWeight: 'bold'
+		bottom: '3px'
+		left: '50px'
+		height: '30px'
+		position: 'absolute'
+		zIndex: '10'
+		textShadow: '0 0 4px #FFFFFF, 0 0 4px #FFFFFF'

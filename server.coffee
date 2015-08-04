@@ -1,56 +1,58 @@
 Db = require 'db'
+Plugin = require 'plugin'
+Timer = require 'timer'
+Event = require 'event'
+Http = require 'http'
+Geoloc = require 'geoloc'
 
-exports.onInstall = ->
-	# set the counter to 0 on plugin installation
-	Db.shared.set 'counter', 0
+# ==================== Events ====================
+# Game install
+exports.onInstall = !->
+	log "Installed"
 
-# exported functions prefixed with 'client_' are callable by our client code using `Server.call`
-exports.client_incr = ->
-	log 'hello world!' # write to the plugin's log
-	Db.shared.modify 'counter', (v) -> v+1
+# Game update
+exports.onUpgrade = !->
+	log '[onUpgrade()] at '+new Date()
 
-exports.client_getTime = (cb) ->
-	cb.reply new Date()
+# Get background location from player.
+exports.onGeoloc = (userId, geoloc) !->
+	log '[onGeoloc()] Geoloc from ' + Plugin.userName(userId) + '('+userId+'): ', JSON.stringify(geoloc)
+	updateLocation(userId, geoloc.latitude+","+geoloc.longitude, geoloc.accuracy, geoloc.time)
 
-exports.onHttp = (request) ->
-	# special entrypoint for the Http API: called whenever a request is made to our plugin's inbound URL
-	Db.shared.set 'http', request.data
-	request.respond 200, "Thanks for your input\n"
+# Update a location of a client in the database
+updateLocation = (userId, latlong, accuracy, time) !->
+	Timer.cancel 'locationTimeout', {userId: userId}
+	return if !latlong
+	currentTime = new Date()/1000
+	time = currentTime if !(time?)
+	time = currentTime if time>currentTime
+	Db.shared.set "locations", userId, "lastUpdate", time
+	Db.shared.set "locations", userId, "latlong", latlong
+	if accuracy?
+		Db.shared.set "locations", userId, "accuracy", accuracy
+	Timer.set 1000*60*60*2, 'locationTimeout', {userId: userId}
 
-exports.client_fetchHn = ->
-	Http = require 'http'
-	Http.get
-		url: 'https://news.ycombinator.com'
-		name: 'hnResponse' # corresponds to exports.hnResponse below
+# Checkin location for capturing a beacon
+exports.client_checkinLocation = (location, accuracy, timestamp) !->
+	userId = Plugin.userId()
+	log '[checkinLocation()] from ' + Plugin.userName(userId) + '('+userId+'): ', location + ", accuracy="+accuracy+", time="+timestamp
+	updateLocation(userId, location, accuracy, timestamp)
 
-exports.hnResponse = (data) !->
-	# called when the Http API has the result for the above request
-	
-	re = /<a href="(http[^"]+)">([^<]+)<\/a>/g
-	# regex to find urls/titles in html
+# Request to update all locations
+exports.client_update = !->
+	lastRequest = Db.shared.peek('lastBackgroundUpdate') ? 0
+	now = new Date()/1000
+	if now-lastRequest > 60
+		Db.shared.set 'lastBackgroundUpdate', now
+		userIds = []
+		for userId in Plugin.userIds()
+			userIds.push userId
+		result = Geoloc.request(userIds)
+		log 'Updating: self=', userIds, "actually=", result
 
-	id = 1
-	while id < 5 and m = re.exec(data)
-		[all, url, title] = m
-		log 'hn headline', title, url
-		continue if url is 'http://www.ycombinator.com' # header link
-		Db.shared.set 'hn', id,
-			title: title
-			url: url
-		id++
-
-exports.onPhoto = (info) !->
-	# entrypoint when a photo is uploaded by the plugin
-	log 'onPhoto', JSON.stringify(info)
-	Db.shared.set 'photo', info.key
-
-exports.client_event = !->
-	# send push event to all group members
-	Event = require 'event'
-	Event.create
-		text: "Test event"
-		# sender: Plugin.userId() # prevent push (but bubble) to sender
-		# for: [1, 2] # to only include group members 1 and 2
-		# for: [-3] # to exclude group member 3
-		# for: ['admin', 2] # to group admins and member 2
-
+# Called after a certain time to remove an old location
+## args.userId
+exports.locationTimeout = (args) !->
+	if args.userId and args.userId?
+		Db.shared.remove "locations", args.userId
+		log "[locationTimeout()] "+Plugin.userName(args.userId)+" ("+args.userId+") removed (timeout)"
