@@ -5,7 +5,6 @@ Modal = require 'modal'
 Obs = require 'obs'
 Plugin = require 'plugin'
 Page = require 'page'
-Server = require 'server'
 Ui = require 'ui'
 Geoloc = require 'geoloc'
 Form = require 'form'
@@ -18,6 +17,8 @@ Map = require 'map'
 # Plugin files
 CSS = require 'css'
 
+ownLocation = Obs.create undefined
+
 # ========== Events ==========
 # Main function, called when plugin is started
 exports.render = !->
@@ -25,7 +26,6 @@ exports.render = !->
 	Obs.onClean !->
 		log 'FULL CLEAN'
 	# Request a background location update for the other users
-	Server.sync 'update'
 	Dom.div !->
 		Dom.style
 			position: "absolute"
@@ -36,16 +36,15 @@ exports.render = !->
 		# Map view
 		Obs.observe !->
 			renderMap()
-	Dom.div !->
-		Dom.style
-			position: "absolute"
-			top: "0"
-			left: "0"
-			right: "0"
-		# Enable/disable location sharing bar
-		Obs.observe !->
-			if !Geoloc.isSubscribed()
+	# Enable/disable location sharing bar
+	Obs.observe !->
+		if !Geoloc.isSubscribed()
+			Dom.div !->
 				Dom.style
+					position: "absolute"
+					top: "0"
+					left: "0"
+					right: "0"
 					width: "100%"
 					zIndex: "10000"
 					color: '#666'
@@ -81,11 +80,12 @@ renderMap = !->
 	log " renderMap()"
 	showPopup = Obs.create ""
 	map = Map.render
-		zoom: 12
+		zoom: Db.local.peek('lastMapZoom') ? 12
 		minZoom: 2
 		clustering: true
 		clusterRadius: 45
 		clusterSpreadMultiplier: 2
+		latlong: Db.local.peek('lastMapLocation') ? "52.444553, 5.740644"
 		#onTap: !->
 		#	showPopup.set ""
 		#onLongTap: !->
@@ -93,266 +93,148 @@ renderMap = !->
 	, (map) !->
 		log "map=", map
 		log "map.getBounds()=", map.state
-		restoreMapLocation(map)
 		renderLocations(map, showPopup)
-		renderOwnLocation(map, showPopup)
 		Obs.observe !->
 			Db.local.set 'lastMapLocation', map.getLatlong()
 			Db.local.set 'lastMapZoom', map.getZoom()
-
-# Restore the old map location (used to center the map on the previous view after reloading the app)
-restoreMapLocation = (map) !->
-	lastLocation = Db.local.peek('lastMapLocation')
-	lastZoom = Db.local.peek('lastMapZoom')
-	if lastLocation? and lastZoom?
-		log "Map settings restored: location="+lastLocation+", zoom="+lastZoom
-		map.setLatlong lastLocation
-		map.setZoom lastZoom
+	renderIndicationArrow(map)
 
 # Render the locations on the map
 renderLocations = (map, showPopup) !->
 	log "renderLocations()"
-	Db.shared.iterate 'locations', (userLocation) !->
-		if (userLocation.key()+"") is (Plugin.userId()+"")
-			return
-		Obs.observe !->
-			location = userLocation.get('latlong')
-			accuracy = userLocation.get('accuracy')
-			if location?
-				map.marker location, !->
-					#log "user="+userLocation.key()+", location="+location+", accuracy="+accuracy
-					Dom.style
-						width: "42px"
-						height: "42px"
-						margin: "-21px 0 0 -21px"
-						backgroundColor: "#FFF"
-						borderRadius: "50%"
-					Dom.div !->
-						Ui.avatar Plugin.userAvatar(userLocation.key()), size: 40
-						Dom.style
-							borderRadius: "50%"
-							backgroundSize: "contain"
-							backgroundRepeat: "no-repeat"
-							backgroundColor: "#FFF"
-						Obs.observe !->
-							lastUpdate = userLocation.get('lastUpdate')
-							if ((new Date()/1000)-lastUpdate) > 60*60 # Make old locations less visible
-								Dom.style
-									opacity: 0.7
-							else
-								Dom.style
-									opacity: 1
-					# Popup div
-					Obs.observe !->
-						lastUpdate = userLocation.get('lastUpdate')
-						if showPopup.get() is userLocation.key()
-							Dom.div !->
-								Dom.div !->
-									Dom.style
-										textOverflow: 'ellipsis'
-										whiteSpace: 'nowrap'
-										overflow: 'hidden'
-									Dom.text Plugin.userName(userLocation.key())
-									if lastUpdate?
-										Dom.br()
-										Time.deltaText lastUpdate
-								popupStyling()
-					# Popup trigger
-					Dom.onTap !->
-						if showPopup.peek() is userLocation.key()
-							showPopup.set ""
-						else
-							showPopup.set userLocation.key()
-				radius = accuracy
-				if radius > 1000
-					radius = 1000
-				map.circle location, radius,
-					color: '#0077cf',
-					fillColor: '#0077cf',
-					fillOpacity: 0.4
-					weight: 2
-					opacity: 0.5
-					tap: !->
-						if showPopup.peek() is userLocation.key()
-							showPopup.set ""
-						else
-							showPopup.set userLocation.key()
-
-# Render and track own location
-renderOwnLocation = (map, showPopup) !->
-	log "renderOwnLocation()"
-	latest = undefined
-	diff = undefined
 	Obs.observe !->
-		if Geoloc.isSubscribed()
-			state = Geoloc.track(100, 5)
-			log "geoloc start tracking"
-			Obs.onClean !->
-				log "geoloc stop tracking"
+		trackAll = Geoloc.trackAll()
+		Plugin.users.iterate (user) !->
+			userLocation = trackAll.ref(user.key())
+			self = (userLocation.key()+"") is (Plugin.userId()+"")
+			if self
+				if !Geoloc.isSubscribed()
+					return
+				state = Geoloc.track(100,5)
+				log "tracking own location: "+state
+				Obs.onClean !->
+					log "Stop tracking own location"
+			return if !userLocation.isHash() and !self
 			Obs.observe !->
-				location = state.get('latlong') # TODO: should change
-				latest = state.get('timestamp')
+				location = if self then state.get('latlong') else userLocation.get('latlong')
+				accuracy = if self then state.get('accuracy') else userLocation.get('accuracy')
+				lastTime = if self then state.peek('time') else userLocation.peek('time')
+				if ((new Date()/1000)-lastTime) > 60*60*3 && !self
+					log "not showing: "+userLocation.key()
+					return
+				log "location update: "+self+", location="+location
 				if location?
-					[lat,long] = location.split(",")
-					log '  location update: location='+location+", accuracy="+state.peek('accuracy')
-					if location? and lat? and long?
-						map.marker location, !->
+					ownLocation.set(location) if self
+					map.marker location, !->
+						#log "user="+userLocation.key()+", location="+location+", accuracy="+accuracy
+						Dom.style
+							width: "42px"
+							height: "42px"
+							margin: "-21px 0 0 -21px"
+							backgroundColor: "#FFF"
+							borderRadius: "50%"
+						Dom.div !->
+							Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40
 							Dom.style
-								width: "42px"
-								height: "42px"
-								margin: "-21px 0 0 -21px"
-								backgroundColor: "#FFF"
 								borderRadius: "50%"
-							Dom.div !->
-								Ui.avatar Plugin.userAvatar(Plugin.userId()), size: 40
-								Obs.observe !->
-									lastUpdate = Db.shared.get('locations', Plugin.userId(), 'lastUpdate') ? 0
-									if ((new Date()/1000)-lastUpdate) > 60*60 # Make old locations less visible
-										Dom.style
-											opacity: 0.7
-									else
-										Dom.style
-											opacity: 1
-								Dom.style
-									borderRadius: "50%"
-									backgroundColor: "#FFF"
-							Dom.style
 								backgroundSize: "contain"
 								backgroundRepeat: "no-repeat"
-								zIndex: "10000"
-							# Popup div
+								backgroundColor: "#FFF"
 							Obs.observe !->
-								if showPopup.get() is Plugin.userId()
-									Dom.div !->
-										Dom.div !->
-											Dom.style
-												textOverflow: 'ellipsis'
-												whiteSpace: 'nowrap'
-												overflow: 'hidden'
-											Dom.text "Your location"
-											lastUpdate = Db.shared.get 'locations', Plugin.userId(), 'lastUpdate'
-											if lastUpdate?
-												Dom.br()
-												Time.deltaText lastUpdate
-										popupStyling()
-							# Popup trigger
-							Dom.onTap !->
-								if showPopup.peek() is Plugin.userId()
-									showPopup.set ""
+								lastUpdate = userLocation.get('time')
+								if ((new Date()/1000)-lastUpdate) > 60*60 # Make old locations less visible
+									Dom.style
+										opacity: 0.7
 								else
-									showPopup.set Plugin.userId()
-					# Render accuracy circle
-					Obs.observe !->
-						accuracy = state.get('accuracy')
-						radius = accuracy
-						if radius > 1000
-							radius = 1000
-						map.circle location, radius,
-							color: '#FFA200',
-							fillColor: '#FFA200',
-							fillOpacity: 0.4
-							weight: 2
-							opacity: 0.5
-							onTap: !->
-								if showPopup.peek() is Plugin.userId()
-									showPopup.set ""
-								else
-									showPopup.set Plugin.userId()
+									Dom.style
+										opacity: 1
+						# Popup div
 						Obs.observe !->
-							# Send location to server if it is outdated or has bad accuracy
-							lastRemoteUpdate = Db.shared.peek("locations", Plugin.userId(), "lastUpdate") ? 0
-							lastLocalUpdate = Db.local.peek("lastUpdate") ? 0
-							lastAccuracy = Db.shared.peek("locations", Plugin.userId(), "accuracy") ? Infinity
-							if (lastAccuracy > 100 and accuracy < lastAccuracy) or (lastRemoteUpdate < ((new Date()/1000)-60) and lastLocalUpdate < ((new Date()/1000)-60))
-								Db.local.set "lastUpdate", new Date()/1000
-								log "checking in location"
-								Server.send 'checkinLocation', location, accuracy, latest/1000
-					Obs.observe !->
-						# Render an arrow that points to your location if you do not have it on your screen already
-						if !(Map.inBounds(location, map.getLatlongNW(), map.getLatlongSE()))
-							#log 'Your location is outside your viewport, rendering indication arrow'
-							anchor = map.getLatlongSW() # Location closest to the position of the indication arrow
-							[anchorLat,anchorLong] = anchor.split(",")
-							pi = 3.14159265
-							difLat = Math.abs(lat - anchorLat)
-							difLng = Math.abs(long - anchorLong)
-							angle = 0
-							if long > anchorLong and lat > anchorLat
-								angle = Math.atan(difLng/difLat)
-							else if long > anchorLong and lat <= anchorLat
-								angle = Math.atan(difLat/difLng)+ pi/2
-							else if long <= anchorLong and lat <= anchorLat
-								angle = Math.atan(difLng/difLat)+ pi
-							else if long <= anchorLong and lat > anchorLat
-								angle = (pi-Math.atan(difLng/difLat)) + pi
-							t = "rotate(" +angle + "rad)"
-							distance = Map.distance(location, anchor)
-							if distance <= 1000
-								distance = Math.round(distance) + "m"
-							if distance > 1000
-								distance = Math.round(distance/1000) + "km"
-							Dom.div !->
-								Dom.cls 'indicationArrow'
-								Dom.style
-									mozTransform: t
-									msTransform: t
-									oTransform: t
-									webkitTransform: t
-									transform: t
-									backgroundColor: '#0077cf'
-							Dom.div !->
-								Dom.cls 'indicationArrowText'
-								Dom.text "You're " + distance + " away"
-							Dom.div !->
-								Dom.onTap !->
-									map.setLatlong(location)
-									map.setZoom(16)
-								Dom.style
-									position: 'absolute'
-									bottom: '0px'
-									left: '0px'
-									width: '160px'
-									height: '45px'
-									zIndex: '11'
+							lastUpdate = userLocation.get('time')
+							if showPopup.get() is userLocation.key()
+								Dom.div !->
+									Dom.div !->
+										Dom.style
+											textOverflow: 'ellipsis'
+											whiteSpace: 'nowrap'
+											overflow: 'hidden'
+										Dom.text if self then "Your location" else Plugin.userName(userLocation.key())
+										if lastUpdate?
+											Dom.br()
+											Time.deltaText lastUpdate
+									popupStyling()
+						# Popup trigger
+						Dom.onTap !->
+							if showPopup.peek() is userLocation.key()
+								showPopup.set ""
+							else
+								showPopup.set userLocation.key()
+					radius = accuracy
+					if radius > 1000
+						radius = 1000
+					map.circle location, radius,
+						color: if self then '#FFA200' else '#0077cf'
+						fillColor: if self then '#FFA200' else '#0077cf'
+						fillOpacity: 0.4
+						weight: 2
+						opacity: 0.5
+						tap: !->
+							if showPopup.peek() is userLocation.key()
+								showPopup.set ""
+							else
+								showPopup.set userLocation.key()
 
-					# Geoloc testing
-					###
-					Dom.div !->
-						diff = state.get('timestamp') - latest
-						latest = state.get('timestamp')
-						Dom.style
-							width: '100%'
-							position: 'absolute'
-							bottom: '49px'
-							left: '0'
-							zIndex: '2000'
-							padding: '11px'
-							fontSize: '16px'
-							boxSizing: 'border-box'
-							backgroundColor: '#888888'
-							color: 'white'
-							_display: 'flex'
-							_alignItems: 'center'
-						Dom.div !->
-							Dom.style
-								float: 'left'
-								marginRight: '10px'
-								width: '30px'
-								_flexGrow: '0'
-								_flexShrink: '0'
-							Icon.render data: 'info', color: '#fff', style: { paddingRight: '10px'}, size: 30
-						Dom.div !->
-							Dom.style
-								_flexGrow: '1'
-								_flexShrink: '1'
-							Dom.text "lat=" + lat + ", long=" + long + ", accuracy=" + state.get('accuracy') + ", slow=" + state.get('slow') + ", time=" + state.get('timestamp') + " ("
-							Time.deltaText state.get('timestamp')/1000
-							Dom.text ")"
-							Dom.br()
-							Dom.text "diff="+diff/1000
-					###
-				else
-					log 'Location could not be found'
+renderIndicationArrow = (map) !->
+	Obs.observe !->
+		location = ownLocation.get()
+		if location?
+			[lat,long] = location.split(",")
+			# Render an arrow that points to your location if you do not have it on your screen already
+			if !(Map.inBounds(location, map.getLatlongNW(), map.getLatlongSE()))
+				#log 'Your location is outside your viewport, rendering indication arrow'
+				anchor = map.getLatlongSW() # Location closest to the position of the indication arrow
+				[anchorLat,anchorLong] = anchor.split(",")
+				pi = 3.14159265
+				difLat = Math.abs(lat - anchorLat)
+				difLng = Math.abs(long - anchorLong)
+				angle = 0
+				if long > anchorLong and lat > anchorLat
+					angle = Math.atan(difLng/difLat)
+				else if long > anchorLong and lat <= anchorLat
+					angle = Math.atan(difLat/difLng)+ pi/2
+				else if long <= anchorLong and lat <= anchorLat
+					angle = Math.atan(difLng/difLat)+ pi
+				else if long <= anchorLong and lat > anchorLat
+					angle = (pi-Math.atan(difLng/difLat)) + pi
+				t = "rotate(" +angle + "rad)"
+				distance = Map.distance(location, anchor)
+				if distance <= 1000
+					distance = Math.round(distance) + "m"
+				if distance > 1000
+					distance = Math.round(distance/1000) + "km"
+				Dom.div !->
+					Dom.cls 'indicationArrow'
+					Dom.style
+						mozTransform: t
+						msTransform: t
+						oTransform: t
+						webkitTransform: t
+						transform: t
+						backgroundColor: '#0077cf'
+				Dom.div !->
+					Dom.cls 'indicationArrowText'
+					Dom.text "You're " + distance + " away"
+				Dom.div !->
+					Dom.onTap !->
+						map.setLatlong(location)
+						map.setZoom(16)
+					Dom.style
+						position: 'absolute'
+						bottom: '0px'
+						left: '0px'
+						width: '160px'
+						height: '45px'
+						zIndex: '11'
 
 # Style a marker popup
 popupStyling = () !->
