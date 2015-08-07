@@ -17,7 +17,11 @@ Map = require 'map'
 # Plugin files
 CSS = require 'css'
 
-ownLocation = Obs.create undefined
+trackAll = undefined
+trackSelf = undefined
+trackAllShow = Obs.create {}
+setInitialView = undefined
+SMART_INITIALVIEW_MAX = 25
 
 # ========== Events ==========
 # Main function, called when plugin is started
@@ -25,7 +29,7 @@ exports.render = !->
 	log 'FULL RENDER'
 	Obs.onClean !->
 		log 'FULL CLEAN'
-	# Request a background location update for the other users
+	setInitialView = true
 	Dom.div !->
 		Dom.style
 			position: "absolute"
@@ -36,17 +40,46 @@ exports.render = !->
 		# Map view
 		Obs.observe !->
 			renderMap()
-	# Enable/disable location sharing bar
+
+# Render a map
+renderMap = !->
+	log " renderMap()"
+	showPopup = Obs.create ""
+	map = Map.render
+		zoom: Db.local.peek('lastMapZoom') ? 12
+		minZoom: 2
+		clustering: true
+		clusterRadius: 45
+		clusterSpreadMultiplier: 2
+		latlong: Db.local.peek('lastMapLocation') ? "52.444553, 5.740644"
+		#onTap: !->
+		#	showPopup.set ""
+		#onLongTap: !->
+		#	showPopup.set ""
+	, (map) !->
+		log "map=", map
+		log "map.getBounds()=", map.state
+		renderLocations(map, showPopup)
+		Obs.observe !->
+			Db.local.set 'lastMapLocation', map.getLatlong()
+			Db.local.set 'lastMapZoom', map.getZoom()
+	# Top bar
+	Dom.div !->
+		Dom.style
+			position: "absolute"
+			left: "0"
+			right: "0"
+			top: "0"
+			zIndex: "100000"
+		renderLocationSharing()
+		renderPointers(map)
+
+renderLocationSharing = !->
 	Obs.observe !->
 		if !Geoloc.isSubscribed()
 			Dom.div !->
 				Dom.style
-					position: "absolute"
-					top: "0"
-					left: "0"
-					right: "0"
 					width: "100%"
-					zIndex: "10000"
 					color: '#666'
 					padding: '0'
 					fontSize: '16px'
@@ -71,33 +104,9 @@ exports.render = !->
 						Dom.div !->
 							Dom.style
 								fontSize: "75%"
-							Dom.text "Currently others cannot see your location"
+							Dom.text tr("Currently others cannot see your location")
 				Dom.onTap !->
 					Geoloc.subscribe()
-
-# Render a map
-renderMap = !->
-	log " renderMap()"
-	showPopup = Obs.create ""
-	map = Map.render
-		zoom: Db.local.peek('lastMapZoom') ? 12
-		minZoom: 2
-		clustering: true
-		clusterRadius: 45
-		clusterSpreadMultiplier: 2
-		latlong: Db.local.peek('lastMapLocation') ? "52.444553, 5.740644"
-		#onTap: !->
-		#	showPopup.set ""
-		#onLongTap: !->
-		#	showPopup.set ""
-	, (map) !->
-		log "map=", map
-		log "map.getBounds()=", map.state
-		renderLocations(map, showPopup)
-		Obs.observe !->
-			Db.local.set 'lastMapLocation', map.getLatlong()
-			Db.local.set 'lastMapZoom', map.getZoom()
-	renderIndicationArrow(map)
 
 # Render the locations on the map
 renderLocations = (map, showPopup) !->
@@ -110,7 +119,7 @@ renderLocations = (map, showPopup) !->
 			if self
 				if !Geoloc.isSubscribed()
 					return
-				state = Geoloc.track(100,5)
+				trackSelf = state = Geoloc.track(100,5)
 				log "tracking own location: "+state
 				Obs.onClean !->
 					log "Stop tracking own location"
@@ -121,10 +130,12 @@ renderLocations = (map, showPopup) !->
 				lastTime = if self then state.peek('time') else userLocation.peek('time')
 				if ((new Date()/1000)-lastTime) > 60*60*3 && !self
 					log "not showing: "+userLocation.key()
+					trackAllShow.remove user.key()
 					return
+				else
+					trackAllShow.set user.key(), true
 				log "location update: "+self+", location="+location
 				if location?
-					ownLocation.set(location) if self
 					map.marker location, !->
 						#log "user="+userLocation.key()+", location="+location+", accuracy="+accuracy
 						Dom.style
@@ -183,58 +194,174 @@ renderLocations = (map, showPopup) !->
 								showPopup.set ""
 							else
 								showPopup.set userLocation.key()
-
-renderIndicationArrow = (map) !->
 	Obs.observe !->
-		location = ownLocation.get()
-		if location?
-			[lat,long] = location.split(",")
-			# Render an arrow that points to your location if you do not have it on your screen already
-			if !(Map.inBounds(location, map.getLatlongNW(), map.getLatlongSE()))
-				#log 'Your location is outside your viewport, rendering indication arrow'
-				anchor = map.getLatlongSW() # Location closest to the position of the indication arrow
-				[anchorLat,anchorLong] = anchor.split(",")
-				pi = 3.14159265
-				difLat = Math.abs(lat - anchorLat)
-				difLng = Math.abs(long - anchorLong)
-				angle = 0
-				if long > anchorLong and lat > anchorLat
-					angle = Math.atan(difLng/difLat)
-				else if long > anchorLong and lat <= anchorLat
-					angle = Math.atan(difLat/difLng)+ pi/2
-				else if long <= anchorLong and lat <= anchorLat
-					angle = Math.atan(difLng/difLat)+ pi
-				else if long <= anchorLong and lat > anchorLat
-					angle = (pi-Math.atan(difLng/difLat)) + pi
-				t = "rotate(" +angle + "rad)"
-				distance = Map.distance(location, anchor)
-				if distance <= 1000
-					distance = Math.round(distance) + "m"
-				if distance > 1000
-					distance = Math.round(distance/1000) + "km"
-				Dom.div !->
-					Dom.cls 'indicationArrow'
-					Dom.style
-						mozTransform: t
-						msTransform: t
-						oTransform: t
-						webkitTransform: t
-						transform: t
-						backgroundColor: '#0077cf'
-				Dom.div !->
-					Dom.cls 'indicationArrowText'
-					Dom.text "You're " + distance + " away"
-				Dom.div !->
-					Dom.onTap !->
-						map.setLatlong(location)
-						map.setZoom(16)
-					Dom.style
-						position: 'absolute'
-						bottom: '0px'
-						left: '0px'
-						width: '160px'
-						height: '45px'
-						zIndex: '11'
+		# set initial view
+		if setInitialView
+			shownCount = trackAllShow.count().peek()
+			if shownCount > SMART_INITIALVIEW_MAX or shownCount <= 2
+				locations = []
+				trackAll.iterate (user) !->
+					if trackAllShow.peek(user.key()) is true
+						locations.push user.peek('latlong')
+				log "simple moveInView, locations=", locations
+				map.moveInView(locations, 0.2)
+				setInitialView = false
+			else
+				log "smart moveInView start"
+				#log "  trackAll count="+trackAll.count().peek()
+				users = Obs.create {}
+				trackAllShow.iterate (user) !->
+					users.set user.key(),
+						latlong: trackAll.peek(user.key(), 'latlong')
+						weight: 1.0
+				#log "  initial users: "+JSON.stringify(users.peek())
+				done = false
+				#log "  shownCount="+shownCount
+				for i in [0..shownCount]
+					if !done
+						# Check reach for each (combined) user
+						users.iterate (user) !->
+							if (user.peek('weight')/shownCount) > 0.7 and !done# More as 70%
+								locations = []
+								for user in user.key().split(",")
+									locations.push trackAll.peek(user, 'latlong')
+								log "smart moveInView done, locations=", locations
+								map.moveInView(locations, 0.2)
+								setInitialView = false
+								done = true
+					if !done
+						connectionFrom = undefined
+						connectionTo = undefined
+						connectionDistance = undefined
+						doneUsers = Obs.create {}
+						# Calculate best merge
+						users.iterate (fromUser) !->
+							users.iterate (toUser) !->
+								if !(doneUsers.peek(fromUser.key()) is true) && !(fromUser.key() is toUser.key())
+									# calculate distance
+									distance = Map.distance(fromUser.peek('latlong'), toUser.peek('latlong'))
+									if !connectionFrom? or distance < connectionDistance
+										connectionFrom = fromUser.key()
+										connectionTo = toUser.key()
+										connectionDistance = distance
+									# make connection
+							doneUsers.set fromUser.key(), true
+						#log "  best merge: from="+connectionFrom+", to="+connectionTo+", distance="+connectionDistance
+						# Calculate average location
+						[latFrom, longFrom] = users.peek(connectionFrom, 'latlong').split(",")
+						[latTo, longTo] = users.peek(connectionTo, 'latlong').split(",")
+						weightTo = users.peek(connectionTo, 'weight')
+						weightFrom = users.peek(connectionFrom, 'weight')
+						latA = ((parseFloat(latFrom)*weightFrom)+(parseFloat(latTo))*weightTo)/(weightTo+weightFrom)
+						longA = (parseFloat(longFrom)+parseFloat(longTo))/2.0
+						averageLocation = latA + "," + longA
+						#log "averageLocation="+averageLocation
+						# Setup new combined user
+						users.set connectionFrom + "," + connectionTo,
+							latlong: averageLocation
+							weight: users.peek(connectionFrom, 'weight')+users.peek(connectionTo, 'weight')
+						users.remove connectionFrom
+						users.remove connectionTo
+						#log "    new users: "+JSON.stringify(users.peek())
+
+renderPointers = (map) !->
+	Obs.observe !->
+		trackAllCount = trackAll.count().get()
+		visible = Obs.create 0
+		possibleItems = 2*Math.floor(Page.width()/62.0)
+		log "trackAllCount="+trackAllCount+", possibleItems="+possibleItems
+		if trackAllShow.count().get() > possibleItems
+			return
+		Dom.div !->
+			Dom.style
+				padding: "2px 2px 0 2px"
+			trackAll.iterate (user) !->
+				if !(trackAllShow.get(user.key()) is true)
+					return
+				self = Plugin.userId()+"" is user.key()+""
+				if self
+					tracker = trackSelf
+				else
+					tracker = user
+				if tracker?
+					location = tracker.get('latlong')
+					lastTime = tracker.get('time')
+					if location?
+						[lat,long] = location.split(",")
+						# Render an arrow that points to your location if you do not have it on your screen already
+						if !(Map.inBounds(location, map.getLatlongNW(), map.getLatlongSE()))
+							if visible.peek() >= possibleItems
+								return
+							Dom.div !->
+								visible.modify((v) -> v+1)
+								Obs.onClean !->
+									visible.modify((v) -> v-1)
+								Dom.style
+									display: "inline-block"
+									textAlign: "center"
+									padding: "7px"
+								Dom.onTap !->
+									map.setLatlong location
+									map.setZoom 16
+								Dom.div !->
+									anchor = map.getLatlongNW()
+									[anchorLat,anchorLong] = anchor.split(",")
+									pi = 3.14159265
+									difLat = Math.abs(lat - anchorLat)
+									difLng = Math.abs(long - anchorLong)
+									angle = 0
+									if long > anchorLong and lat > anchorLat
+										angle = Math.atan(difLng/difLat)
+									else if long > anchorLong and lat <= anchorLat
+										angle = Math.atan(difLat/difLng)+ pi/2
+									else if long <= anchorLong and lat <= anchorLat
+										angle = Math.atan(difLng/difLat)+ pi
+									else if long <= anchorLong and lat > anchorLat
+										angle = (pi-Math.atan(difLng/difLat)) + pi
+									t = "rotate(" +angle + "rad)"
+									Dom.cls 'indicationArrow'
+									Dom.style
+										mozTransform: t
+										msTransform: t
+										oTransform: t
+										webkitTransform: t
+										_transform: t
+								Dom.div !->
+									Dom.style
+										margin: "-47px 0 0 1px"
+										_transform: "translate3d(0,0,0)"
+									Ui.avatar Plugin.userAvatar(user.key()), size: 44, style:
+										backgroundColor: "#FFF"
+										display: "block"
+										border: "0 none"
+										margin: "0"
+								Dom.div !->
+									Dom.style
+										overflow: "hidden"
+										width: '50px'
+										height: '50px'
+										marginLeft: "-2px"
+										marginTop: "-47px"
+										borderRadius: '50%'
+										_transform: "translate3d(0,0,0)"
+									Dom.div !->
+										anchor = map.getLatlongNW()
+										distance = Map.distance(location, anchor)
+										if distance <= 1000
+											distanceString = Math.round(distance) + "m"
+										else
+											distanceString = Math.round(distance/1000) + "km"
+										Dom.style
+											backgroundColor: "#0077cf"
+											color: "#FFF"
+											fontSize: "50%"
+											width: "50px"
+											height: "20px"
+											marginTop: "38px"
+										Dom.text distanceString
+								#Dom.div !->
+								#	Dom.cls 'indicationArrowText'
+								#	Dom.text "You're " + distance + " away"
 
 # Style a marker popup
 popupStyling = () !->
