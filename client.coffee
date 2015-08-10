@@ -14,6 +14,7 @@ Event = require 'event'
 Photo = require 'photo'
 Map = require 'map'
 {tr} = require 'i18n'
+Server = require 'server'
 # Plugin files
 CSS = require 'css'
 
@@ -45,6 +46,10 @@ exports.render = !->
 renderMap = !->
 	log " renderMap()"
 	showPopup = Obs.create ""
+	tap = false
+	if Db.local.get('settingPlaceToBe')
+		tap = settingPlaceToBeTap
+		log "settingPlaceToBeTap=", settingPlaceToBeTap
 	map = Map.render
 		zoom: Db.local.peek('lastMapZoom') ? 12
 		minZoom: 2
@@ -52,14 +57,12 @@ renderMap = !->
 		clusterRadius: 45
 		clusterSpreadMultiplier: 2
 		latlong: Db.local.peek('lastMapLocation') ? "52.444553, 5.740644"
-		#onTap: !->
-		#	showPopup.set ""
-		#onLongTap: !->
-		#	showPopup.set ""
+		onTap: tap
 	, (map) !->
 		log "map=", map
 		log "map.getBounds()=", map.state
 		renderLocations(map, showPopup)
+		renderPlaceToBe(map)
 		Obs.observe !->
 			Db.local.set 'lastMapLocation', map.getLatlong()
 			Db.local.set 'lastMapZoom', map.getZoom()
@@ -72,7 +75,10 @@ renderMap = !->
 			top: "0"
 			zIndex: "100000"
 		renderLocationSharing()
+		renderSettingPlaceToBe()
 		renderPointers(map)
+	# Bottom
+	renderPlaceToBePointer(map)
 
 renderLocationSharing = !->
 	Obs.observe !->
@@ -94,7 +100,7 @@ renderLocationSharing = !->
 						Dom.style
 							width: '30px'
 							height: "30px"
-							padding: "10px 5px 10px 5px"
+							padding: "8px"
 						Icon.render data: 'map', color: Plugin.colors().highlight, style: {position: "static", margin: "0"}, size: 30
 					Dom.div !->
 						Dom.style
@@ -144,21 +150,6 @@ renderLocations = (map, showPopup) !->
 							margin: "-21px 0 0 -21px"
 							backgroundColor: "#FFF"
 							borderRadius: "50%"
-						Dom.div !->
-							Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40
-							Dom.style
-								borderRadius: "50%"
-								backgroundSize: "contain"
-								backgroundRepeat: "no-repeat"
-								backgroundColor: "#FFF"
-							Obs.observe !->
-								lastUpdate = userLocation.get('time')
-								if ((new Date()/1000)-lastUpdate) > 60*60 # Make old locations less visible
-									Dom.style
-										opacity: 0.7
-								else
-									Dom.style
-										opacity: 1
 						# Popup div
 						Obs.observe !->
 							lastUpdate = userLocation.get('time')
@@ -174,6 +165,21 @@ renderLocations = (map, showPopup) !->
 											Dom.br()
 											Time.deltaText lastUpdate
 									popupStyling()
+						Dom.div !->
+							Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40
+							Dom.style
+								borderRadius: "50%"
+								backgroundSize: "contain"
+								backgroundRepeat: "no-repeat"
+								backgroundColor: "#FFF"
+							Obs.observe !->
+								lastUpdate = userLocation.get('time')
+								if ((new Date()/1000)-lastUpdate) > 60*60 # Make old locations less visible
+									Dom.style
+										opacity: 0.7
+								else
+									Dom.style
+										opacity: 1
 						# Popup trigger
 						Dom.onTap !->
 							if showPopup.peek() is userLocation.key()
@@ -304,28 +310,8 @@ renderPointers = (map) !->
 									map.setLatlong location
 									map.setZoom 16
 								Dom.div !->
-									anchor = map.getLatlongNW()
-									[anchorLat,anchorLong] = anchor.split(",")
-									pi = 3.14159265
-									difLat = Math.abs(lat - anchorLat)
-									difLng = Math.abs(long - anchorLong)
-									angle = 0
-									if long > anchorLong and lat > anchorLat
-										angle = Math.atan(difLng/difLat)
-									else if long > anchorLong and lat <= anchorLat
-										angle = Math.atan(difLat/difLng)+ pi/2
-									else if long <= anchorLong and lat <= anchorLat
-										angle = Math.atan(difLng/difLat)+ pi
-									else if long <= anchorLong and lat > anchorLat
-										angle = (pi-Math.atan(difLng/difLat)) + pi
-									t = "rotate(" +angle + "rad)"
+									styleTransformAngle map.getLatlongNW(), location
 									Dom.cls 'indicationArrow'
-									Dom.style
-										mozTransform: t
-										msTransform: t
-										oTransform: t
-										webkitTransform: t
-										_transform: t
 								Dom.div !->
 									Dom.style
 										margin: "-47px 0 0 1px"
@@ -345,12 +331,6 @@ renderPointers = (map) !->
 										borderRadius: '50%'
 										_transform: "translate3d(0,0,0)"
 									Dom.div !->
-										anchor = map.getLatlongNW()
-										distance = Map.distance(location, anchor)
-										if distance <= 1000
-											distanceString = Math.round(distance) + "m"
-										else
-											distanceString = Math.round(distance/1000) + "km"
 										Dom.style
 											backgroundColor: "#0077cf"
 											color: "#FFF"
@@ -358,32 +338,209 @@ renderPointers = (map) !->
 											width: "50px"
 											height: "20px"
 											marginTop: "38px"
-										Dom.text distanceString
+										Dom.text getDistanceString map.getLatlongNW(), location
 								#Dom.div !->
 								#	Dom.cls 'indicationArrowText'
 								#	Dom.text "You're " + distance + " away"
 
+renderPlaceToBe = (map) !->
+	Obs.observe !->
+		info = Db.shared.ref 'placetobe'
+		exists = info.isHash()
+		if exists
+			pLocation = info.get 'latlong'
+			showPopup = Obs.create false
+			# Render marker
+			map.marker pLocation, !->
+				# Popup div
+				Obs.observe !->
+					placedTime = info.get('time')
+					if showPopup.get()
+						Dom.div !->
+							Dom.style width: "150px"
+							Dom.div !->
+								Dom.style
+									whiteSpace: 'normal'
+								if Plugin.userIsAdmin() or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600)
+									Ui.button !->
+										Dom.text "x"
+										Dom.style
+											float: "right"
+											margin: "-27px 68px 0 0"
+											height: "11px"
+											padding: "6px 8px"
+											lineHeight: "12px"
+									, !->
+										log "remove clicked"
+										Modal.confirm "Remove place to be?", "Are you sure you want to remove the place to be?", !->
+											Server.sync 'removePlaceToBe', !->
+												Db.shared.remove 'placetobe'
+										, ['cancel', "Cancel", 'remove', "Remove"]
+
+								Dom.text info.get 'message'
+								if placedTime?
+									Dom.br()
+									Time.deltaText placedTime
+									Dom.text " by "+Plugin.userName(info.get('placer'))
+								Dom.br()
+							popupStyling(150)
+				Dom.style
+					width: "42px"
+					height: "42px"
+					margin: "-21px 0 0 -21px"
+					borderRadius: "50%"
+				Dom.div !->
+					Dom.style
+						width: "42px"
+						height: "42px"
+						borderRadius: "50%"
+						backgroundSize: "contain"
+						backgroundRepeat: "no-repeat"
+						backgroundImage: "url("+Plugin.resourceUri('placetobe.png')+")"
+				# Popup trigger
+				Dom.onTap !->
+					showPopup.modify((v) -> !v)
+
+renderPlaceToBePointer = (map) !->
+	Obs.observe !->
+		info = Db.shared.ref 'placetobe'
+		exists = info.isHash()
+		if exists
+			pLocation = info.get 'latlong'
+			[lat,long] = pLocation.split(",")
+			inBounds = Map.inBounds(pLocation, map.getLatlongNW(), map.getLatlongSE())
+			log "exists="+exists+", inBounds="+inBounds
+		if (!exists and !Db.local.get('settingPlaceToBe')) or (exists and !inBounds)
+			Dom.div !->
+				Dom.style
+					position: "absolute"
+					bottom: "0"
+					left: "0"
+					width: "62px"
+					height: "65px"
+					padding: "0 0 7px 2px"
+				Dom.div !->
+					Dom.style
+						padding: "7px"
+					Dom.div !->
+						if exists
+							styleTransformAngle map.getLatlongSW(), pLocation
+							Dom.cls 'indicationArrow'
+						else
+							Dom.style
+								width: '50px'
+								height: '50px'
+								marginLeft: "-2px"
+								borderRadius: '50%'
+					Dom.div !->
+						Dom.style
+							margin: "-47px 0 0 1px"
+							_transform: "translate3d(0,0,0)"
+							backgroundSize: "contain"
+							backgroundRepeat: "no-repeat"
+							width: "44px"
+							height: "44px"
+							borderRadius: "50%"
+							backgroundImage: "url("+Plugin.resourceUri('placetobe.png')+")"
+							backgroundPosition: "50% 50%"
+					if exists
+						Dom.div !->
+							Dom.style
+								overflow: "hidden"
+								width: '50px'
+								height: '50px'
+								marginLeft: "-2px"
+								marginTop: "-47px"
+								borderRadius: '50%'
+								_transform: "translate3d(0,0,0)"
+							Dom.div !->
+								Dom.style
+									backgroundColor: "#0077cf"
+									color: "#FFF"
+									fontSize: "50%"
+									width: "50px"
+									height: "20px"
+									marginTop: "38px"
+									textAlign: "center"
+								Dom.text getDistanceString map.getLatlongSW(), pLocation
+						Dom.onTap !->
+							map.setLatlong pLocation
+							map.setZoom 16
+					else
+						Dom.style
+							opacity: 0.7
+						Dom.onTap !->
+							Db.local.set 'settingPlaceToBe', true
+						# Tap to place place to be :S
+
+renderSettingPlaceToBe = !->
+	if Db.local.get('settingPlaceToBe')
+		Dom.div !->
+			Dom.style
+				Box: 'horizontal'
+				backgroundColor: "white"
+				borderBottom: '1px solid #ccc'
+			Dom.div !->
+				Dom.style
+					width: "30px"
+					height: "30px"
+					padding: "8px"
+				Dom.div !->
+					Dom.style
+						background: "url("+Plugin.resourceUri("placetobe.png")+")"
+						backgroundRepeat: "no-repeat"
+						backgroundSize: "contain"
+						width: "100%"
+						height: "100%"
+			Dom.div !->
+				Dom.style
+					Flex: true
+					padding: "6px 0 5px 0"
+				Dom.text tr("Setting a place to be")
+				Dom.div !->
+					Dom.style
+						fontSize: "75%"
+					Dom.text tr("Click the map where you want to place it")
+			Dom.div !->
+				Dom.style
+					padding: "5px 5px 0 5px"
+					textAlign: "right"
+
+settingPlaceToBeTap = (latlong) !->
+	Db.local.set 'placetobe', latlong
+	result = ''
+	Modal.show tr("Why here?")
+		, !->
+			Dom.text tr("Why is the place to be here?")
+			Form.input
+				text: ''
+				onChange: (v) !-> result = v
+		, (confirmed) ->
+			log "confirmed="+confirmed+", result="+result
+			if confirmed
+				Server.sync 'newPlaceToBe', latlong, result, !->
+					Db.shared.set 'placetobe',
+						latlong: latlong
+						message: result
+						time: Date.now()/1000
+						placer: Plugin.userId()
+				Toast.show tr("Place to be set!")
+			else
+				Toast.show tr("Setting place to be cancelled")
+			Db.local.remove 'settingPlaceToBe'
+			Db.local.remove 'placetobe'
+		, [false,tr('Cancel'),true,tr('OK')]
+
 # Style a marker popup
-popupStyling = () !->
+popupStyling = (fullWidth = 100) !->
 	Dom.style
-		padding: "4px"
-		backgroundColor: "#FFF"
-		width: "100px"
-		margin: "-87px 0 0 -32px"
-		borderRadius: "5px"
-		border: "1px solid #ccc"
-		textAlign: "center"
-		overflow: "visible"
-		textOverflow: 'ellipsis'
-		whiteSpace: 'nowrap'
-		lineHeight: "125%"
-		zIndex: "10000000"
+		width: fullWidth
 	Dom.div !->
 		t = "rotate(45deg)"
 		Dom.style
 			width: "10px"
 			height: "10px"
-			margin: "-2px 0 -9px 43px"
+			margin: "-2px 0 -9px "+(Dom.get().width()/2-9)+"px"
 			backgroundColor: "#FFF"
 			_boxShadow: "1px 1px 0 #BBB"
 			mozTransform: t
@@ -392,3 +549,50 @@ popupStyling = () !->
 			webkitTransform: t
 			transform: t
 			borderRadius: "100% 0 0 0"
+	Dom.style
+		padding: "4px"
+		backgroundColor: "#FFF"
+		borderRadius: "5px"
+		border: "1px solid #ccc"
+		textAlign: "center"
+		overflow: "visible"
+		textOverflow: 'ellipsis'
+		whiteSpace: 'nowrap'
+		lineHeight: "125%"
+		zIndex: "10000000"
+	height = Dom.get().height()
+	width = Dom.get().width()
+	log "popup height="+height, "width="+width
+	Dom.style
+		margin: (-height-7)+"px 0 7px -"+(width/2-25)+"px"
+
+styleTransformAngle = (anchor, to) !->
+	[anchorLat,anchorLong] = anchor.split(",")
+	[lat,long] = to.split(",")
+	pi = 3.14159265
+	difLat = Math.abs(lat - anchorLat)
+	difLng = Math.abs(long - anchorLong)
+	angle = 0
+	if long > anchorLong and lat > anchorLat
+		angle = Math.atan(difLng/difLat)
+	else if long > anchorLong and lat <= anchorLat
+		angle = Math.atan(difLat/difLng)+ pi/2
+	else if long <= anchorLong and lat <= anchorLat
+		angle = Math.atan(difLng/difLat)+ pi
+	else if long <= anchorLong and lat > anchorLat
+		angle = (pi-Math.atan(difLng/difLat)) + pi
+	t = "rotate(" +angle + "rad)"
+	Dom.style
+		mozTransform: t
+		msTransform: t
+		oTransform: t
+		webkitTransform: t
+		_transform: t
+
+getDistanceString = (from, to) !->
+	distance = Map.distance(from, to)
+	if distance <= 1000
+		distanceString = Math.round(distance) + "m"
+	else
+		distanceString = Math.round(distance/1000) + "km"
+	return distanceString
