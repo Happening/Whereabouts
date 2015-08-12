@@ -148,7 +148,6 @@ renderLocations = (map, showPopup) !->
 							width: "42px"
 							height: "42px"
 							margin: "-21px 0 0 -21px"
-							backgroundColor: "#FFF"
 							borderRadius: "50%"
 						# Popup div
 						Obs.observe !->
@@ -539,12 +538,15 @@ settingPlaceToBeTap = (latlong) !->
 popupStyling = (fullWidth = 100) !->
 	Dom.style
 		width: fullWidth
+		padding: "4px"
+		border: "1px solid #ccc"
 	Dom.div !->
 		t = "rotate(45deg)"
+		log "width="+Dom.get().width()
 		Dom.style
 			width: "10px"
 			height: "10px"
-			margin: "-2px 0 -9px "+(Dom.get().width()/2-9)+"px"
+			margin: "-2px 0 -9px "+((Dom.get().width()+10)/2-9)+"px"
 			backgroundColor: "#FFF"
 			_boxShadow: "1px 1px 0 #BBB"
 			mozTransform: t
@@ -554,10 +556,8 @@ popupStyling = (fullWidth = 100) !->
 			transform: t
 			borderRadius: "100% 0 0 0"
 	Dom.style
-		padding: "4px"
 		backgroundColor: "#FFF"
 		borderRadius: "5px"
-		border: "1px solid #ccc"
 		textAlign: "center"
 		overflow: "visible"
 		textOverflow: 'ellipsis'
@@ -567,9 +567,9 @@ popupStyling = (fullWidth = 100) !->
 		color: "#222"
 	height = Dom.get().height()
 	width = Dom.get().width()
-	log "popup height="+height, "width="+width
+	log "later width="+width
 	Dom.style
-		margin: (-height-7)+"px 0 7px -"+(width/2-25)+"px"
+		margin: (-height-7-21)+"px 0 7px -"+(width/2-21)+"px" # 21=half height of marker itself
 
 styleTransformAngle = (anchor, to) !->
 	[anchorLat,anchorLong] = anchor.split(",")
