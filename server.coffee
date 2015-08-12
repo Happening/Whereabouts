@@ -16,7 +16,7 @@ exports.onUpgrade = !->
 exports.client_newPlaceToBe = (latlong, message) !->
 	log "[newPlaceToBe] latlong="+latlong+", message="+message
 	Timer.cancel 'placeToBeTimeout', {}
-	if Plugin.userIsAdmin(Plugin.userId()) or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600)
+	if Plugin.userIsAdmin(Plugin.userId()) or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
 		Db.shared.set 'placetobe',
 			latlong: latlong
 			message: message
@@ -37,7 +37,7 @@ exports.client_newPlaceToBe = (latlong, message) !->
 # Remove the place to be
 exports.client_removePlaceToBe = !->
 	log "[removePlaceToBe] trying place to be remove"
-	if Plugin.userIsAdmin(Plugin.userId()) or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600)
+	if Plugin.userIsAdmin(Plugin.userId()) or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
 		log "removed"
 		Db.shared.remove 'placetobe'
 		Timer.cancel 'placeToBeTimeout', {}

@@ -157,13 +157,14 @@ renderLocations = (map, showPopup) !->
 								Dom.div !->
 									Dom.div !->
 										Dom.style
-											textOverflow: 'ellipsis'
-											whiteSpace: 'nowrap'
-											overflow: 'hidden'
+											whiteSpace: 'normal'
 										Dom.text if self then "Your location" else Plugin.userName(userLocation.key())
 										if lastUpdate?
-											Dom.br()
-											Time.deltaText lastUpdate
+											Dom.div !->
+												Time.deltaText lastUpdate
+												Dom.style
+													fontSize: "90%"
+													color: "#999"
 									popupStyling()
 						Dom.div !->
 							Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40
@@ -210,7 +211,8 @@ renderLocations = (map, showPopup) !->
 					if trackAllShow.peek(user.key()) is true
 						locations.push user.peek('latlong')
 				log "simple moveInView, locations=", locations
-				map.moveInView(locations, 0.2)
+				if locations.length > 0
+					map.moveInView(locations, 0.2)
 				setInitialView = false
 			else
 				log "smart moveInView start"
@@ -361,12 +363,12 @@ renderPlaceToBe = (map) !->
 							Dom.div !->
 								Dom.style
 									whiteSpace: 'normal'
-								if Plugin.userIsAdmin() or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600)
+								if Plugin.userIsAdmin() or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
 									Ui.button !->
 										Dom.text "x"
 										Dom.style
 											float: "right"
-											margin: "-27px 68px 0 0"
+											margin: "0"
 											height: "11px"
 											padding: "6px 8px"
 											lineHeight: "12px"
@@ -379,10 +381,12 @@ renderPlaceToBe = (map) !->
 
 								Dom.text info.get 'message'
 								if placedTime?
-									Dom.br()
-									Time.deltaText placedTime
-									Dom.text " by "+Plugin.userName(info.get('placer'))
-								Dom.br()
+									Dom.div !->
+										Time.deltaText placedTime
+										Dom.text " by "+Plugin.userName(info.get('placer'))
+										Dom.style
+											fontSize: "90%"
+											color: "#999"
 							popupStyling(150)
 				Dom.style
 					width: "42px"
@@ -513,7 +517,7 @@ settingPlaceToBeTap = (latlong) !->
 		, !->
 			Dom.text tr("Why is the place to be here?")
 			Form.input
-				text: ''
+				text: 'description'
 				onChange: (v) !-> result = v
 		, (confirmed) ->
 			log "confirmed="+confirmed+", result="+result
@@ -560,6 +564,7 @@ popupStyling = (fullWidth = 100) !->
 		whiteSpace: 'nowrap'
 		lineHeight: "125%"
 		zIndex: "10000000"
+		color: "#222"
 	height = Dom.get().height()
 	width = Dom.get().width()
 	log "popup height="+height, "width="+width
