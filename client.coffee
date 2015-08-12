@@ -121,7 +121,7 @@ renderLocations = (map, showPopup) !->
 		trackAll = Geoloc.trackAll()
 		Plugin.users.iterate (user) !->
 			userLocation = trackAll.ref(user.key())
-			self = (userLocation.key()+"") is (Plugin.userId()+"")
+			self = (user.key()+"") is (Plugin.userId()+"")
 			if self
 				if !Geoloc.isSubscribed()
 					return
@@ -129,7 +129,7 @@ renderLocations = (map, showPopup) !->
 				log "tracking own location: "+state
 				Obs.onClean !->
 					log "Stop tracking own location"
-			return if !userLocation.isHash() and !self
+			return if !userLocation?.isHash() and !self
 			Obs.observe !->
 				location = if self then state.get('latlong') else userLocation.get('latlong')
 				accuracy = if self then state.get('accuracy') else userLocation.get('accuracy')
