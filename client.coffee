@@ -508,6 +508,9 @@ renderSettingPlaceToBe = !->
 				Dom.style
 					padding: "5px 5px 0 5px"
 					textAlign: "right"
+				Ui.button "Cancel", !->
+					Db.local.remove 'settingPlaceToBe'
+					Db.local.remove 'placetobe'
 
 settingPlaceToBeTap = (latlong) !->
 	Db.local.set 'placetobe', latlong
