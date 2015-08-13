@@ -13,7 +13,7 @@ exports.onInstall = !->
 exports.onUpgrade = !->
 	log '[onUpgrade()] at '+new Date()
 
-exports.client_newPlaceToBe = (latlong, message) !->
+exports.client_newPlaceToBe = (latlong, message='') !->
 	log "[newPlaceToBe] latlong="+latlong+", message="+message
 	Timer.cancel 'placeToBeTimeout', {}
 	if Plugin.userIsAdmin(Plugin.userId()) or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
@@ -29,7 +29,7 @@ exports.client_newPlaceToBe = (latlong, message) !->
 		Event.create
 			unit: 'newPlaceToBe'
 			include: users
-			text: "Place to be by "+Plugin.userName(Plugin.userId())+": "+message
+			text: "Place to be set by "+Plugin.userName(Plugin.userId())+(if message then ": "+message else '')
 		Timer.set 1000*60*60*12, 'placeToBeTimeout', {} # Remove after 12 hours
 	else
 		log "cancelled"

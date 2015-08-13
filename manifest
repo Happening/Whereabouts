@@ -1,4 +1,5 @@
-name: LocationChecker
-description: Check the location of the people in your group
+name: Whereabouts
+description: See the whereabouts of other members.
 api: 2
-icon: map2
+icon: circle2
+store: 700

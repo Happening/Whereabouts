@@ -50,6 +50,8 @@ renderMap = !->
 	if Db.local.get('settingPlaceToBe')
 		tap = settingPlaceToBeTap
 		log "settingPlaceToBeTap=", settingPlaceToBeTap
+	else
+		tap = !-> showPopup.set(false)
 	map = Map.render
 		zoom: Db.local.peek('lastMapZoom') ? 12
 		minZoom: 2
@@ -62,7 +64,7 @@ renderMap = !->
 		log "map=", map
 		log "map.getBounds()=", map.state
 		renderLocations(map, showPopup)
-		renderPlaceToBe(map)
+		renderPlaceToBe(map, showPopup)
 		Obs.observe !->
 			Db.local.set 'lastMapLocation', map.getLatlong()
 			Db.local.set 'lastMapZoom', map.getZoom()
@@ -95,13 +97,10 @@ renderLocationSharing = !->
 					borderBottom: '1px solid #ccc'
 				Dom.div !->
 					Dom.style
-						Box: 'horizontal'
+						Box: 'horizontal', backgroundColor: Plugin.colors().highlight, color: '#fff'
 					Dom.div !->
-						Dom.style
-							width: '30px'
-							height: "30px"
-							padding: "8px"
-						Icon.render data: 'map', color: Plugin.colors().highlight, style: {position: "static", margin: "0"}, size: 30
+						Dom.style padding: "13px"
+						Icon.render data: 'map', color: '#fff', style: {position: "static", margin: "0"}, size: 24
 					Dom.div !->
 						Dom.style
 							Flex: true
@@ -192,9 +191,9 @@ renderLocations = (map, showPopup) !->
 					map.circle location, radius,
 						color: if self then '#FFA200' else '#0077cf'
 						fillColor: if self then '#FFA200' else '#0077cf'
-						fillOpacity: 0.4
-						weight: 2
-						opacity: 0.5
+						fillOpacity: 0.1
+						weight: 1
+						opacity: 0.3
 						tap: !->
 							if showPopup.peek() is userLocation.key()
 								showPopup.set ""
@@ -338,54 +337,52 @@ renderPointers = (map) !->
 											fontSize: "50%"
 											width: "50px"
 											height: "20px"
-											marginTop: "38px"
+											paddingTop: "2px"
+											marginTop: "35px"
 										Dom.text getDistanceString map.getLatlongNW(), location
 								#Dom.div !->
 								#	Dom.cls 'indicationArrowText'
 								#	Dom.text "You're " + distance + " away"
 
-renderPlaceToBe = (map) !->
+renderPlaceToBe = (map, showPopup) !->
 	Obs.observe !->
 		info = Db.shared.ref 'placetobe'
 		exists = info.isHash()
 		if exists
 			pLocation = info.get 'latlong'
-			showPopup = Obs.create false
 			# Render marker
 			map.marker pLocation, !->
 				# Popup div
 				Obs.observe !->
 					placedTime = info.get('time')
-					if showPopup.get()
+					if showPopup.get() is 'placeToBe'
 						Dom.div !->
 							Dom.style width: "150px"
 							Dom.div !->
-								Dom.style
-									whiteSpace: 'normal'
-								if Plugin.userIsAdmin() or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
-									Ui.button !->
-										Dom.text "x"
-										Dom.style
-											float: "right"
-											margin: "0"
-											height: "11px"
-											padding: "6px 8px"
-											lineHeight: "12px"
-									, !->
-										log "remove clicked"
-										Modal.confirm "Remove place to be?", "Are you sure you want to remove the place to be?", !->
-											Server.sync 'removePlaceToBe', !->
-												Db.shared.remove 'placetobe'
-										, ['cancel', "Cancel", 'remove', "Remove"]
+								Dom.style Box: 'center', whiteSpace: 'normal'
 
-								Dom.text info.get 'message'
-								if placedTime?
-									Dom.div !->
-										Time.deltaText placedTime
-										Dom.text " by "+Plugin.userName(info.get('placer'))
-										Dom.style
-											fontSize: "90%"
-											color: "#999"
+								Dom.div !->
+									Dom.style Flex: true
+									Dom.userText info.get('message')||tr("Place to be")
+									if placedTime?
+										Dom.div !->
+											Time.deltaText placedTime
+											Dom.text " by "+Plugin.userName(info.get('placer'))
+											Dom.style
+												fontSize: "90%"
+												color: "#999"
+
+								if Plugin.userIsAdmin() or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
+									Icon.render
+										data: 'trash'
+										style: padding: '4px'
+										onTap: !->
+											log "remove clicked"
+											Modal.confirm null, "Are you sure you want to remove the place to be?", !->
+												Server.sync 'removePlaceToBe', !->
+													Db.shared.remove 'placetobe'
+											, ['cancel', "Cancel", 'remove', "Remove"]
+
 							popupStyling(150)
 				Dom.style
 					width: "42px"
@@ -402,7 +399,10 @@ renderPlaceToBe = (map) !->
 						backgroundImage: "url("+Plugin.resourceUri('placetobe.png')+")"
 				# Popup trigger
 				Dom.onTap !->
-					showPopup.modify((v) -> !v)
+					if showPopup.peek() is 'placeToBe'
+						showPopup.set ""
+					else
+						showPopup.set 'placeToBe'
 
 renderPlaceToBePointer = (map) !->
 	Obs.observe !->
@@ -463,7 +463,8 @@ renderPlaceToBePointer = (map) !->
 									fontSize: "50%"
 									width: "50px"
 									height: "20px"
-									marginTop: "38px"
+									paddingTop: "2px"
+									marginTop: "35px"
 									textAlign: "center"
 								Dom.text getDistanceString map.getLatlongSW(), pLocation
 						Dom.onTap !->
@@ -481,13 +482,13 @@ renderSettingPlaceToBe = !->
 		Dom.div !->
 			Dom.style
 				Box: 'horizontal'
-				backgroundColor: "white"
+				backgroundColor: "#eaeaea"
 				borderBottom: '1px solid #ccc'
 			Dom.div !->
 				Dom.style
-					width: "30px"
-					height: "30px"
-					padding: "8px"
+					width: "24px"
+					height: "24px"
+					padding: "13px"
 				Dom.div !->
 					Dom.style
 						background: "url("+Plugin.resourceUri("placetobe.png")+")"
@@ -498,12 +499,11 @@ renderSettingPlaceToBe = !->
 			Dom.div !->
 				Dom.style
 					Flex: true
-					padding: "6px 0 5px 0"
-				Dom.text tr("Setting a place to be")
+					padding: "8px 0 5px 0"
+				Dom.text tr("Place to be")
 				Dom.div !->
-					Dom.style
-						fontSize: "75%"
-					Dom.text tr("Click the map where you want to place it")
+					Dom.style fontSize: "75%"
+					Dom.text tr("Tap the map to set its location...")
 			Dom.div !->
 				Dom.style
 					padding: "5px 5px 0 5px"
@@ -512,15 +512,15 @@ renderSettingPlaceToBe = !->
 settingPlaceToBeTap = (latlong) !->
 	Db.local.set 'placetobe', latlong
 	result = ''
-	Modal.show tr("Why here?")
+	Modal.show tr("Set place to be?")
 		, !->
-			Dom.text tr("Why is the place to be here?")
-			Form.input
-				text: 'description'
+			Form.text
+				text: tr("Description (optional)")
 				onChange: (v) !-> result = v
 		, (confirmed) ->
 			log "confirmed="+confirmed+", result="+result
 			if confirmed
+				result = Form.smileyToEmoji result
 				Server.sync 'newPlaceToBe', latlong, result, !->
 					Db.shared.set 'placetobe',
 						latlong: latlong
@@ -532,13 +532,13 @@ settingPlaceToBeTap = (latlong) !->
 				Toast.show tr("Setting place to be cancelled")
 			Db.local.remove 'settingPlaceToBe'
 			Db.local.remove 'placetobe'
-		, [false,tr('Cancel'),true,tr('OK')]
+		, [false,tr('Cancel'),true,tr('Set')]
 
 # Style a marker popup
 popupStyling = (fullWidth = 100) !->
 	Dom.style
 		width: fullWidth
-		padding: "4px"
+		padding: "8px"
 		border: "1px solid #ccc"
 	Dom.div !->
 		t = "rotate(45deg)"
@@ -546,7 +546,7 @@ popupStyling = (fullWidth = 100) !->
 		Dom.style
 			width: "10px"
 			height: "10px"
-			margin: "-2px 0 -9px "+((Dom.get().width()+10)/2-9)+"px"
+			margin: "0 0 -12px "+((Dom.get().width()+10)/2-9)+"px"
 			backgroundColor: "#FFF"
 			_boxShadow: "1px 1px 0 #BBB"
 			mozTransform: t
