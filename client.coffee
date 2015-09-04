@@ -23,13 +23,12 @@ trackSelf = undefined
 trackAllShow = Obs.create {}
 setInitialView = undefined
 SMART_INITIALVIEW_MAX = 25
+showSpinner = Obs.create {}
+justOpened = true
 
 # ========== Events ==========
 # Main function, called when plugin is started
 exports.render = !->
-	log 'FULL RENDER'
-	Obs.onClean !->
-		log 'FULL CLEAN'
 	setInitialView = true
 	Dom.div !->
 		Dom.style
@@ -44,12 +43,10 @@ exports.render = !->
 
 # Render a map
 renderMap = !->
-	log " renderMap()"
 	showPopup = Obs.create ""
 	tap = false
 	if Db.local.get('settingPlaceToBe')
 		tap = settingPlaceToBeTap
-		log "settingPlaceToBeTap=", settingPlaceToBeTap
 	else
 		tap = !-> showPopup.set(false)
 	map = Map.render
@@ -61,8 +58,6 @@ renderMap = !->
 		latlong: Db.local.peek('lastMapLocation') ? "52.444553, 5.740644"
 		onTap: tap
 	, (map) !->
-		log "map=", map
-		log "map.getBounds()=", map.state
 		renderLocations(map, showPopup)
 		renderPlaceToBe(map, showPopup)
 		Obs.observe !->
@@ -115,7 +110,6 @@ renderLocationSharing = !->
 
 # Render the locations on the map
 renderLocations = (map, showPopup) !->
-	log "renderLocations()"
 	Obs.observe !->
 		trackAll = Geoloc.trackAll()
 		Plugin.users.iterate (user) !->
@@ -125,24 +119,23 @@ renderLocations = (map, showPopup) !->
 				if !Geoloc.isSubscribed()
 					return
 				trackSelf = state = Geoloc.track(100,5)
-				log "tracking own location: "+state
-				Obs.onClean !->
-					log "Stop tracking own location"
-			return if !userLocation?.isHash() and !self
+			if !userLocation?.isHash() and !self
+				showSpinner.set user.key(), justOpened
+				return
 			Obs.observe !->
 				location = if self then state.get('latlong') else userLocation.get('latlong')
 				accuracy = if self then state.get('accuracy') else userLocation.get('accuracy')
-				lastTime = if self then state.peek('time') else userLocation.peek('time')
+				lastTime = (if self then state.peek('time') else userLocation.peek('time'))||0
 				if ((new Date()/1000)-lastTime) > 60*60*3 && !self
-					log "not showing: "+userLocation.key()
 					trackAllShow.remove user.key()
+					showSpinner.set user.key(), justOpened
 					return
 				else
 					trackAllShow.set user.key(), true
-				log "location update: "+self+", location="+location
 				if location?
+					#log "Location "+Plugin.userName(user.key())+": "+location
+					showSpinner.remove user.key()
 					map.marker location, !->
-						#log "user="+userLocation.key()+", location="+location+", accuracy="+accuracy
 						Dom.style
 							width: "42px"
 							height: "42px"
@@ -208,21 +201,16 @@ renderLocations = (map, showPopup) !->
 				trackAll.iterate (user) !->
 					if trackAllShow.peek(user.key()) is true
 						locations.push user.peek('latlong')
-				log "simple moveInView, locations=", locations
 				if locations.length > 0
 					map.moveInView(locations, 0.2)
 				setInitialView = false
 			else
-				log "smart moveInView start"
-				#log "  trackAll count="+trackAll.count().peek()
 				users = Obs.create {}
 				trackAllShow.iterate (user) !->
 					users.set user.key(),
 						latlong: trackAll.peek(user.key(), 'latlong')
 						weight: 1.0
-				#log "  initial users: "+JSON.stringify(users.peek())
 				done = false
-				#log "  shownCount="+shownCount
 				for i in [0..shownCount]
 					if !done
 						# Check reach for each (combined) user
@@ -231,7 +219,6 @@ renderLocations = (map, showPopup) !->
 								locations = []
 								for user in user.key().split(",")
 									locations.push trackAll.peek(user, 'latlong')
-								log "smart moveInView done, locations=", locations
 								map.moveInView(locations, 0.2)
 								setInitialView = false
 								done = true
@@ -252,7 +239,6 @@ renderLocations = (map, showPopup) !->
 										connectionDistance = distance
 									# make connection
 							doneUsers.set fromUser.key(), true
-						#log "  best merge: from="+connectionFrom+", to="+connectionTo+", distance="+connectionDistance
 						# Calculate average location
 						[latFrom, longFrom] = users.peek(connectionFrom, 'latlong').split(",")
 						[latTo, longTo] = users.peek(connectionTo, 'latlong').split(",")
@@ -261,21 +247,18 @@ renderLocations = (map, showPopup) !->
 						latA = ((parseFloat(latFrom)*weightFrom)+(parseFloat(latTo))*weightTo)/(weightTo+weightFrom)
 						longA = (parseFloat(longFrom)+parseFloat(longTo))/2.0
 						averageLocation = latA + "," + longA
-						#log "averageLocation="+averageLocation
 						# Setup new combined user
 						users.set connectionFrom + "," + connectionTo,
 							latlong: averageLocation
 							weight: users.peek(connectionFrom, 'weight')+users.peek(connectionTo, 'weight')
 						users.remove connectionFrom
 						users.remove connectionTo
-						#log "    new users: "+JSON.stringify(users.peek())
 
 renderPointers = (map) !->
 	Obs.observe !->
 		trackAllCount = trackAll.count().get()
 		visible = Obs.create 0
 		possibleItems = 2*Math.floor(Page.width()/62.0)
-		log "trackAllCount="+trackAllCount+", possibleItems="+possibleItems
 		if trackAllShow.count().get() > possibleItems
 			return
 		Dom.div !->
@@ -283,6 +266,7 @@ renderPointers = (map) !->
 				padding: "2px 2px 0 2px"
 			trackAll.iterate (user) !->
 				if !(trackAllShow.get(user.key()) is true)
+					showSpinner.set user.key(), true
 					return
 				self = Plugin.userId()+"" is user.key()+""
 				if self
@@ -340,9 +324,47 @@ renderPointers = (map) !->
 											paddingTop: "2px"
 											marginTop: "35px"
 										Dom.text getDistanceString map.getLatlongNW(), location
-								#Dom.div !->
-								#	Dom.cls 'indicationArrowText'
-								#	Dom.text "You're " + distance + " away"
+			# Remove spinners after a minute
+			if justOpened
+				justOpened = false
+				Obs.onTime 60*1000, !->
+					showSpinner.set {}
+			Plugin.users.iterate (user) !->
+				if !showSpinner.get(user.key())
+					return
+				#log "showing as spinner: "+Plugin.userName(user.key())
+				self = Plugin.userId()+"" is user.key()+""
+				if visible.peek() >= possibleItems
+					return
+				Dom.div !->
+					visible.modify((v) -> v+1)
+					Obs.onClean !->
+						visible.modify((v) -> v-1)
+					Dom.style
+						display: "inline-block"
+						textAlign: "center"
+						padding: "7px"
+						height: "43px"
+					Dom.div !->
+						Dom.style
+							width: '50px'
+							height: '50px'
+							marginLeft: "-2px"
+							borderRadius: '50%'
+							backgroundColor: '#929292'
+					Dom.div !->
+						Dom.style
+							margin: "-45px 0 0 3px"
+							_transform: "translate3d(0,0,0)"
+						Ui.avatar Plugin.userAvatar(user.key()), size: 40, style:
+							backgroundColor: "#FFF"
+							display: "block"
+							border: "0 none"
+							margin: "0"
+						Ui.spinner 50, !->
+							Dom.style
+								margin: "-45px 0 0 -5px"
+								opacity: "0.3"
 
 renderPlaceToBe = (map, showPopup) !->
 	Obs.observe !->
@@ -377,7 +399,6 @@ renderPlaceToBe = (map, showPopup) !->
 										data: 'trash'
 										style: padding: '4px'
 										onTap: !->
-											log "remove clicked"
 											Modal.confirm null, "Are you sure you want to remove the place to be?", !->
 												Server.sync 'removePlaceToBe', !->
 													Db.shared.remove 'placetobe'
@@ -412,7 +433,6 @@ renderPlaceToBePointer = (map) !->
 			pLocation = info.get 'latlong'
 			[lat,long] = pLocation.split(",")
 			inBounds = Map.inBounds(pLocation, map.getLatlongNW(), map.getLatlongSE())
-			log "exists="+exists+", inBounds="+inBounds
 		if (!exists and !Db.local.get('settingPlaceToBe')) or (exists and !inBounds)
 			Dom.div !->
 				Dom.style
@@ -521,7 +541,6 @@ settingPlaceToBeTap = (latlong) !->
 				text: tr("Description (optional)")
 				onChange: (v) !-> result = v
 		, (confirmed) ->
-			log "confirmed="+confirmed+", result="+result
 			if confirmed
 				result = Form.smileyToEmoji result
 				Server.sync 'newPlaceToBe', latlong, result, !->
@@ -545,7 +564,6 @@ popupStyling = (fullWidth = 100) !->
 		border: "1px solid #ccc"
 	Dom.div !->
 		t = "rotate(45deg)"
-		log "width="+Dom.get().width()
 		Dom.style
 			width: "10px"
 			height: "10px"
@@ -570,7 +588,6 @@ popupStyling = (fullWidth = 100) !->
 		color: "#222"
 	height = Dom.get().height()
 	width = Dom.get().width()
-	log "later width="+width
 	Dom.style
 		margin: (-height-7-21)+"px 0 7px -"+(width/2-21)+"px" # 21=half height of marker itself
 
