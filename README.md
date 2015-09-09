@@ -1,6 +1,6 @@
-Example
-=======
-An example Group App for Happening.
+Whereabouts
+===========
+See the whereabouts of other members, displays the locations of all users in the group (if they gave location permission) on a map.
 
 What's Happening?
 -----------------
