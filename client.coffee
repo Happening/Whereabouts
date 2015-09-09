@@ -25,10 +25,12 @@ setInitialView = undefined
 SMART_INITIALVIEW_MAX = 25
 showSpinner = Obs.create {}
 justOpened = true
+openedAt = undefined
 
 # ========== Events ==========
 # Main function, called when plugin is started
 exports.render = !->
+
 	setInitialView = true
 	Dom.div !->
 		Dom.style
@@ -117,23 +119,24 @@ renderLocations = (map, showPopup) !->
 			self = (user.key()+"") is (Plugin.userId()+"")
 			if self
 				if !Geoloc.isSubscribed()
+					trackAllShow.remove user.key()
 					return
 				trackSelf = state = Geoloc.track(100,5)
-			if !userLocation?.isHash() and !self
-				showSpinner.set user.key(), justOpened
-				return
 			Obs.observe !->
+				if !userLocation?.isHash() and !self
+					if Geoloc.isSubscribed(user.key()) > 0
+						showSpinner.set user.key(), justOpened
+					return
 				location = if self then state.get('latlong') else userLocation.get('latlong')
 				accuracy = if self then state.get('accuracy') else userLocation.get('accuracy')
-				lastTime = (if self then state.peek('time') else userLocation.peek('time'))||0
-				if ((new Date()/1000)-lastTime) > 60*60*3 && !self
+				lastTime = (if self then state.peek('time') else userLocation.get('time'))||0
+				if ((new Date()/1000)-lastTime) > 60*60*3
 					trackAllShow.remove user.key()
 					showSpinner.set user.key(), justOpened
 					return
 				else
 					trackAllShow.set user.key(), true
 				if location?
-					#log "Location "+Plugin.userName(user.key())+": "+location
 					showSpinner.remove user.key()
 					map.marker location, !->
 						Dom.style
@@ -158,20 +161,20 @@ renderLocations = (map, showPopup) !->
 													color: "#999"
 									popupStyling()
 						Dom.div !->
-							Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40
+							Obs.observe !->
+								lastUpdate = userLocation.get('time')
+								if ((new Date()/1000)-lastUpdate) > 60*60 # Make old locations less visible
+									style =
+										opacity: 0.7
+								else
+									style =
+										opacity: 1
+								Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40, style: style
 							Dom.style
 								borderRadius: "50%"
 								backgroundSize: "contain"
 								backgroundRepeat: "no-repeat"
 								backgroundColor: "#FFF"
-							Obs.observe !->
-								lastUpdate = userLocation.get('time')
-								if ((new Date()/1000)-lastUpdate) > 60*60 # Make old locations less visible
-									Dom.style
-										opacity: 0.7
-								else
-									Dom.style
-										opacity: 1
 						# Popup trigger
 						Dom.onTap !->
 							if showPopup.peek() is userLocation.key()
@@ -206,16 +209,17 @@ renderLocations = (map, showPopup) !->
 				setInitialView = false
 			else
 				users = Obs.create {}
-				trackAllShow.iterate (user) !->
-					users.set user.key(),
-						latlong: trackAll.peek(user.key(), 'latlong')
-						weight: 1.0
+				trackAll.iterate (user) !->
+					if trackAllShow.peek(user.key()) is true
+						users.set user.key(),
+							latlong: user.peek('latlong')
+							weight: 1.0
 				done = false
 				for i in [0..shownCount]
 					if !done
 						# Check reach for each (combined) user
 						users.iterate (user) !->
-							if (user.peek('weight')/shownCount) > 0.7 and !done# More as 70%
+							if (user.peek('weight')/shownCount) > 0.7 and !done # More as 70%
 								locations = []
 								for user in user.key().split(",")
 									locations.push trackAll.peek(user, 'latlong')
@@ -266,7 +270,6 @@ renderPointers = (map) !->
 				padding: "2px 2px 0 2px"
 			trackAll.iterate (user) !->
 				if !(trackAllShow.get(user.key()) is true)
-					showSpinner.set user.key(), true
 					return
 				self = Plugin.userId()+"" is user.key()+""
 				if self
@@ -327,8 +330,14 @@ renderPointers = (map) !->
 			# Remove spinners after a minute
 			if justOpened
 				justOpened = false
+				openedAt = Date.now()
 				Obs.onTime 60*1000, !->
 					showSpinner.set {}
+			else
+				if (diff = (Date.now() - openedAt)) < 60*1000
+					Obs.onTime 60*1000-diff, !->
+						showSpinner.set {}
+			# Render spinners
 			Plugin.users.iterate (user) !->
 				if !showSpinner.get(user.key())
 					return
@@ -564,10 +573,11 @@ popupStyling = (fullWidth = 100) !->
 		border: "1px solid #ccc"
 	Dom.div !->
 		t = "rotate(45deg)"
+		if (width = Dom.get().width()) is 0 then width = fullWidth
 		Dom.style
 			width: "10px"
 			height: "10px"
-			margin: "0 0 -12px "+((Dom.get().width()+10)/2-9)+"px"
+			margin: "0 0 -12px "+((width+10)/2-9)+"px"
 			backgroundColor: "#FFF"
 			_boxShadow: "1px 1px 0 #BBB"
 			mozTransform: t
@@ -588,6 +598,7 @@ popupStyling = (fullWidth = 100) !->
 		color: "#222"
 	height = Dom.get().height()
 	width = Dom.get().width()
+	width = fullWidth if width is 0
 	Dom.style
 		margin: (-height-7-21)+"px 0 7px -"+(width/2-21)+"px" # 21=half height of marker itself
 
