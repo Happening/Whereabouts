@@ -117,10 +117,10 @@ renderLocations = (map, showPopup) !->
 		Plugin.users.iterate (user) !->
 			userLocation = trackAll.ref(user.key())
 			self = (user.key()+"") is (Plugin.userId()+"")
+			if !Geoloc.isSubscribed(user.key())
+				trackAllShow.remove user.key()
+				return
 			if self
-				if !Geoloc.isSubscribed()
-					trackAllShow.remove user.key()
-					return
 				trackSelf = state = Geoloc.track(100,5)
 			Obs.observe !->
 				if !userLocation?.isHash() and !self
@@ -164,17 +164,15 @@ renderLocations = (map, showPopup) !->
 							Obs.observe !->
 								lastUpdate = userLocation.get('time')
 								if ((new Date()/1000)-lastUpdate) > 60*60 # Make old locations less visible
-									style =
-										opacity: 0.7
+									Dom.style opacity: 0.7
 								else
-									style =
-										opacity: 1
-								Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40, style: style
+									Dom.style opacity: 1
+								Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40
 							Dom.style
 								borderRadius: "50%"
 								backgroundSize: "contain"
 								backgroundRepeat: "no-repeat"
-								backgroundColor: "#FFF"
+								backgroundColor: '#fff'
 						# Popup trigger
 						Dom.onTap !->
 							if showPopup.peek() is userLocation.key()
