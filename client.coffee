@@ -3,7 +3,7 @@ Time = require 'time'
 Dom = require 'dom'
 Modal = require 'modal'
 Obs = require 'obs'
-Plugin = require 'plugin'
+App = require 'app'
 Page = require 'page'
 Ui = require 'ui'
 Geoloc = require 'geoloc'
@@ -30,18 +30,12 @@ openedAt = undefined
 # ========== Events ==========
 # Main function, called when plugin is started
 exports.render = !->
-
 	setInitialView = true
 	Dom.div !->
-		Dom.style
-			position: "absolute"
-			top: "0"
-			right: "0"
-			bottom: "0"
-			left: "0"
-		# Map view
+		Dom.style margin: '0px', width: '100%'
 		Obs.observe !->
-			renderMap()
+			Dom.style height: Page.height()+'px'
+		renderMap()
 
 # Render a map
 renderMap = !->
@@ -73,6 +67,8 @@ renderMap = !->
 			right: "0"
 			top: "0"
 			zIndex: "100000"
+		Obs.observe !->
+			Dom.style width: Page.width()+'px'
 		renderLocationSharing()
 		renderSettingPlaceToBe()
 		renderPointers(map)
@@ -94,7 +90,7 @@ renderLocationSharing = !->
 					borderBottom: '1px solid #ccc'
 				Dom.div !->
 					Dom.style
-						Box: 'horizontal', backgroundColor: Plugin.colors().highlight, color: '#fff'
+						Box: 'horizontal', backgroundColor: App.colors().highlight, color: '#fff'
 					Dom.div !->
 						Dom.style padding: "13px"
 						Icon.render data: 'map', color: '#fff', style: {position: "static", margin: "0"}, size: 24
@@ -114,9 +110,9 @@ renderLocationSharing = !->
 renderLocations = (map, showPopup) !->
 	Obs.observe !->
 		trackAll = Geoloc.trackAll()
-		Plugin.users.iterate (user) !->
+		App.users.iterate (user) !->
 			userLocation = trackAll.ref(user.key())
-			self = (user.key()+"") is (Plugin.userId()+"")
+			self = (user.key()+"") is (App.userId()+"")
 			if !Geoloc.isSubscribed(user.key())
 				trackAllShow.remove user.key()
 				return
@@ -152,7 +148,7 @@ renderLocations = (map, showPopup) !->
 									Dom.div !->
 										Dom.style
 											whiteSpace: 'normal'
-										Dom.text if self then "Your location" else Plugin.userName(userLocation.key())
+										Dom.text if self then "Your location" else App.userName(userLocation.key())
 										if lastUpdate?
 											Dom.div !->
 												Time.deltaText lastUpdate
@@ -167,12 +163,7 @@ renderLocations = (map, showPopup) !->
 									Dom.style opacity: 0.7
 								else
 									Dom.style opacity: 1
-								Ui.avatar Plugin.userAvatar(if self then Plugin.userId() else userLocation.key()), size: 40
-							Dom.style
-								borderRadius: "50%"
-								backgroundSize: "contain"
-								backgroundRepeat: "no-repeat"
-								backgroundColor: '#fff'
+								Ui.avatar App.userAvatar(if self then App.userId() else userLocation.key()), size: 42
 						# Popup trigger
 						Dom.onTap !->
 							if showPopup.peek() is userLocation.key()
@@ -269,7 +260,7 @@ renderPointers = (map) !->
 			trackAll.iterate (user) !->
 				if !(trackAllShow.get(user.key()) is true)
 					return
-				self = Plugin.userId()+"" is user.key()+""
+				self = App.userId()+"" is user.key()+""
 				if self
 					tracker = trackSelf
 				else
@@ -288,31 +279,38 @@ renderPointers = (map) !->
 								Obs.onClean !->
 									visible.modify((v) -> v-1)
 								Dom.style
-									display: "inline-block"
-									textAlign: "center"
-									padding: "7px"
+									display: 'inline-block'
+									padding: '7px'
+									width: '50px'
+									height: '50px'
 								Dom.onTap !->
 									map.setLatlong location
 									map.setZoom 16
 								Dom.div !->
 									styleTransformAngle map.getLatlongNW(), location
-									Dom.cls 'indicationArrow'
-								Dom.div !->
 									Dom.style
-										margin: "-47px 0 0 1px"
+										width: '50px'
+										height: '50px'
+										borderRadius: '50%'
+										backgroundColor: '#0077cf'
+									Dom.cls 'pointerArrow'
+								Dom.div !->
+									avatarKey = App.userAvatar(user.key())
+									Dom.style
+										width: '50px'
+										height: '50px'
+										Box: 'middle center'
+										marginTop: '-50px'
 										_transform: "translate3d(0,0,0)"
-									Ui.avatar Plugin.userAvatar(user.key()), size: 44, style:
-										backgroundColor: "#FFF"
-										display: "block"
-										border: "0 none"
-										margin: "0"
+									Ui.avatar avatarKey, size: 44, style:
+										display: 'block'
+										margin: '0'
 								Dom.div !->
 									Dom.style
 										overflow: "hidden"
 										width: '50px'
 										height: '50px'
-										marginLeft: "-2px"
-										marginTop: "-47px"
+										marginTop: "-50px"
 										borderRadius: '50%'
 										_transform: "translate3d(0,0,0)"
 									Dom.div !->
@@ -324,7 +322,9 @@ renderPointers = (map) !->
 											height: "20px"
 											paddingTop: "2px"
 											marginTop: "35px"
+											textAlign: 'center'
 										Dom.text getDistanceString map.getLatlongNW(), location
+
 			# Remove spinners after a minute
 			if justOpened
 				justOpened = false
@@ -336,11 +336,11 @@ renderPointers = (map) !->
 					Obs.onTime 60*1000-diff, !->
 						showSpinner.set {}
 			# Render spinners
-			Plugin.users.iterate (user) !->
+			App.users.iterate (user) !->
 				if !showSpinner.get(user.key())
 					return
-				#log "showing as spinner: "+Plugin.userName(user.key())
-				self = Plugin.userId()+"" is user.key()+""
+				#log "showing as spinner: "+App.userName(user.key())
+				self = App.userId()+"" is user.key()+""
 				if visible.peek() >= possibleItems
 					return
 				Dom.div !->
@@ -361,16 +361,15 @@ renderPointers = (map) !->
 							backgroundColor: '#929292'
 					Dom.div !->
 						Dom.style
-							margin: "-45px 0 0 3px"
 							_transform: "translate3d(0,0,0)"
-						Ui.avatar Plugin.userAvatar(user.key()), size: 40, style:
-							backgroundColor: "#FFF"
+						Ui.avatar App.userAvatar(user.key()), size: 40, style:
 							display: "block"
-							border: "0 none"
-							margin: "0"
+							position: 'absolute'
+							top: '4px'
+							left: '3px'
 						Ui.spinner 50, !->
 							Dom.style
-								margin: "-45px 0 0 -5px"
+								margin: "-49px 0 0 -2px"
 								opacity: "0.3"
 
 renderPlaceToBe = (map, showPopup) !->
@@ -396,14 +395,14 @@ renderPlaceToBe = (map, showPopup) !->
 									if placedTime?
 										Dom.div !->
 											Time.deltaText placedTime
-											Dom.text " by "+Plugin.userName(info.get('placer'))
+											Dom.text " by "+App.userName(info.get('placer'))
 											Dom.style
 												fontSize: "90%"
 												color: "#999"
 
-								if Plugin.userIsAdmin() or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
+								if App.userIsAdmin() or (Db.shared.get('placetobe', 'time')||0) < (App.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is App.userId()+""
 									Icon.render
-										data: 'trash'
+										data: 'delete'
 										style: padding: '4px'
 										onTap: !->
 											Modal.confirm null, "Are you sure you want to remove the place to be?", !->
@@ -424,7 +423,7 @@ renderPlaceToBe = (map, showPopup) !->
 						borderRadius: "50%"
 						backgroundSize: "contain"
 						backgroundRepeat: "no-repeat"
-						backgroundImage: "url("+Plugin.resourceUri('placetobe.png')+")"
+						backgroundImage: "url("+App.resourceUri('placetobe.png')+")"
 				# Popup trigger
 				Dom.onTap !->
 					if showPopup.peek() is 'placeToBe'
@@ -471,7 +470,7 @@ renderPlaceToBePointer = (map) !->
 							width: "44px"
 							height: "44px"
 							borderRadius: "50%"
-							backgroundImage: "url("+Plugin.resourceUri('placetobe.png')+")"
+							backgroundImage: "url("+App.resourceUri('placetobe.png')+")"
 							backgroundPosition: "50% 50%"
 					if exists
 						Dom.div !->
@@ -518,7 +517,7 @@ renderSettingPlaceToBe = !->
 					padding: "13px"
 				Dom.div !->
 					Dom.style
-						background: "url("+Plugin.resourceUri("placetobe.png")+")"
+						background: "url("+App.resourceUri("placetobe.png")+")"
 						backgroundRepeat: "no-repeat"
 						backgroundSize: "contain"
 						width: "100%"
@@ -555,7 +554,7 @@ settingPlaceToBeTap = (latlong) !->
 						latlong: latlong
 						message: result
 						time: Date.now()/1000
-						placer: Plugin.userId()
+						placer: App.userId()
 				Toast.show tr("Place to be set!")
 			else
 				Toast.show tr("Setting place to be cancelled")

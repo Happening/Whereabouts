@@ -1,5 +1,5 @@
 Db = require 'db'
-Plugin = require 'plugin'
+App = require 'app'
 Timer = require 'timer'
 Event = require 'event'
 Http = require 'http'
@@ -16,20 +16,20 @@ exports.onUpgrade = !->
 exports.client_newPlaceToBe = (latlong, message='') !->
 	log "[newPlaceToBe] latlong="+latlong+", message="+message
 	Timer.cancel 'placeToBeTimeout', {}
-	if Plugin.userIsAdmin(Plugin.userId()) or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
+	if App.userIsAdmin(App.userId()) or (Db.shared.get('placetobe', 'time')||0) < (App.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is App.userId()+""
 		Db.shared.set 'placetobe',
 			latlong: latlong
 			message: message
-			time: Plugin.time()
-			placer: Plugin.userId()
+			time: App.time()
+			placer: App.userId()
 		# Send notification
 		users = []
-		for user in Plugin.userIds()
+		for user in App.userIds()
 			users.push user
 		Event.create
 			unit: 'newPlaceToBe'
 			include: users
-			text: "Place to be set by "+Plugin.userName(Plugin.userId())+(if message then ": "+message else '')
+			text: "Place to be set by "+App.userName(App.userId())+(if message then ": "+message else '')
 		Timer.set 1000*60*60*12, 'placeToBeTimeout', {} # Remove after 12 hours
 	else
 		log "cancelled"
@@ -37,7 +37,7 @@ exports.client_newPlaceToBe = (latlong, message='') !->
 # Remove the place to be
 exports.client_removePlaceToBe = !->
 	log "[removePlaceToBe] trying place to be remove"
-	if Plugin.userIsAdmin(Plugin.userId()) or (Db.shared.get('placetobe', 'time')||0) < (Plugin.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is Plugin.userId()+""
+	if App.userIsAdmin(App.userId()) or (Db.shared.get('placetobe', 'time')||0) < (App.time()-3600) or Db.shared.get('placetobe', 'placer')+"" is App.userId()+""
 		log "removed"
 		Db.shared.remove 'placetobe'
 		Timer.cancel 'placeToBeTimeout', {}
